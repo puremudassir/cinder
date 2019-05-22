@@ -2488,7 +2488,7 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver):
     supports the Cinder Fibre Channel Zone Manager.
     """
 
-    VERSION = "6.0.0"
+    VERSION = "6.0.PowerVC"
 
     def __init__(self, *args, **kwargs):
         execute = kwargs.pop("execute", utils.execute)
@@ -2510,6 +2510,29 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver):
                     matching_hosts.append(host)
                     break  # go to next host
         return matching_hosts
+
+    def get_volume_info(self, vol_refs, filter_set):
+        current_array = self._get_current_array()
+        pure_volumes = current_array.list_volumes(); # TODO: Get managed volumes only?
+        LOG.debug("Retrieved volumes on FlashArray %(flash_array)s: %(pure_volumes)s",
+                  {"flash_array": current_array.get_attributes()["name"],
+                   "pure_volumes": pure_volumes})
+        ret = []
+        for pure_volume in pure_volumes:
+            vol_ret = {
+                'name': pure_volume['name'],
+                # vol_ret["storage_pool"] = ""  # TODO: what is the storage pool?
+                # vol_ret["uuid"]  # TODO: optional, but if we wanted to how would we get it?
+                'status': 'in use',  # TODO: assume that managed volumes are in use?
+                'size': self._round_bytes_to_gib(pure_volume['size']),
+                'itl_list': None,  # TODO:
+                'connection_info': None,  # TODO:
+                'pg83NAA': None,  # TODO:
+                'restricted_metadata': None,  # TODO:
+                'support': None  # TODO:
+            }
+            ret.append(vol_ret)
+        return ret
 
     @staticmethod
     def _get_array_wwns(array):

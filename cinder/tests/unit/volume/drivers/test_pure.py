@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from copy import deepcopy
 import sys
+from copy import deepcopy
 
 import ddt
 import mock
@@ -22,15 +22,15 @@ from oslo_utils import units
 from six.moves import http_client
 
 from cinder import exception
+from cinder import test
 from cinder.objects import fields
 from cinder.objects import volume_type
-from cinder import test
 from cinder.tests.unit import fake_constants as fake
 from cinder.tests.unit import fake_group
 from cinder.tests.unit import fake_group_snapshot
 from cinder.tests.unit import fake_snapshot
 from cinder.tests.unit import fake_volume
-from cinder.volume import utils as volume_utis
+from cinder.volume import utils as volume_utils
 
 
 def fake_retry(exceptions, interval=1, retries=3, backoff_rate=2):
@@ -3363,6 +3363,38 @@ class PureFCDriverTestCase(PureBaseSharedDriverTestCase):
         self.driver._array = self.array
         self.driver._lookup_service = mock.Mock()
 
+    def test_get_volume_info(self):
+        # volume info:
+        vol_refs = None
+        filter_set = None
+        self.array.list_volumes.return_value = [
+        {
+            'name': 'myVol1',
+            'serial': '8E9C7E588B16C1EA00048CCA',
+            'size': 3221225472,
+            'created': '2016-08-05T17:26:34Z',
+            'source': None,
+        },
+        {
+            'name': 'myVol2',
+            'serial': '8E9C7E588B16C1EA00048CCB',
+            'size': 3221225472,
+            'created': '2016-08-05T17:26:34Z',
+            'source': None,
+        },
+        {
+            'name': 'myVol3',
+            'serial': '8E9C7E588B16C1EA00048CCD',
+            'size': 3221225472,
+            'created': '2016-08-05T17:26:34Z',
+            'source': None,
+        }]
+        self.array.get_attributes.return_value = {'name': 'TestFlashArray'}
+        observed = self.driver.get_volume_info(vol_refs, filter_set)
+        expected = {'dummy': 'dummyValue'}
+        self.assertEqual(expected, observed)
+
+
     def test_get_host(self):
         good_host = PURE_HOST.copy()
         good_host.update(wwn=["another-wrong-wwn", INITIATOR_WWN])
@@ -3588,7 +3620,7 @@ class PureVolumeUpdateStatsTestCase(PureBaseSharedDriverTestCase):
                                    config_ratio,
                                    expected_ratio,
                                    auto):
-        volume_utis.get_max_over_subscription_ratio = mock.Mock(
+        volume_utils.get_max_over_subscription_ratio = mock.Mock(
             return_value=expected_ratio)
         self.mock_config.pure_automatic_max_oversubscription_ratio = auto
         self.mock_config.max_over_subscription_ratio = config_ratio
@@ -3881,3 +3913,7 @@ class PureVolumeGroupsTestCase(PureBaseSharedDriverTestCase):
             group_snapshot,
             snapshots
         )
+
+import unittest
+if __name__ == '__main__':
+    unittest.main()
