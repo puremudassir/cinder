@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from copy import deepcopy
 import sys
+from copy import deepcopy
 
 import ddt
 import mock
@@ -22,15 +22,15 @@ from oslo_utils import units
 from six.moves import http_client
 
 from cinder import exception
+from cinder import test
 from cinder.objects import fields
 from cinder.objects import volume_type
-from cinder import test
 from cinder.tests.unit import fake_constants as fake
 from cinder.tests.unit import fake_group
 from cinder.tests.unit import fake_group_snapshot
 from cinder.tests.unit import fake_snapshot
 from cinder.tests.unit import fake_volume
-from cinder.volume import utils as volume_utis
+from cinder.volume import utils as volume_utils
 
 
 def fake_retry(exceptions, interval=1, retries=3, backoff_rate=2):
@@ -3363,6 +3363,73 @@ class PureFCDriverTestCase(PureBaseSharedDriverTestCase):
         self.driver._array = self.array
         self.driver._lookup_service = mock.Mock()
 
+    @mock.patch(FC_DRIVER_OBJ + "._get_array_wwns")
+    def test_get_volume_info(self, mock_get_array_wwns ):
+        # Set up inputs
+        vol_refs = None
+        filter_set = None
+
+        # Set up mocks
+        # Set up list_volumes
+        mock_get_array_wwns.return_value = \
+            [u'5001500150015000', u'5001500150015001', u'5001500150015002', u'5001500150015003']
+        self.array.list_volumes.return_value = [
+        {
+            'name': 'test-vol',
+            'serial': '8E9C7E588B16C1EA00048CCA',
+            'size': 3221225472,
+            'created': '2016-08-05T17:26:34Z',
+            'source': None,
+        },
+        {
+            'name': 'test-vol2',
+            'serial': '8E9C7E588B16C1EA00048CCB',
+            'size': 3221225472,
+            'created': '2016-08-05T17:26:34Z',
+            'source': None,
+        },
+        {
+            'name': 'test-vol3',
+            'serial': '8E9C7E588B16C1EA00048CCD',
+            'size': 3221225472,
+            'created': '2016-08-05T17:26:34Z',
+            'source': None,
+        }]
+        # test-vol3 --> test-hg --> test-h
+        # test-vol  --> test-h2
+
+        def private_vol_connect_side_effect(vol_name):
+            if vol_name == 'test-vol':
+                return [{u'host': u'test-h2', u'name': u'test-vol', u'lun': 1, u'size': 3221225472}]
+            return []
+
+        def shared_vol_connect_side_effect(vol_name):
+            if vol_name == 'test-vol3':
+                return [{u'host': u'test-h', u'size': 3221225472, u'name': u'test-vol3', u'lun': 254,
+                         u'hgroup': u'test-hg'}]
+            return []
+
+        self.array.list_volume_private_connections.side_effect = private_vol_connect_side_effect
+        self.array.list_volume_shared_connections.side_effect = shared_vol_connect_side_effect
+        self.array.list_hosts.return_value = [
+            {u'nqn': [], u'iqn': [u'iqn.1998-01.com.vmware:3m-srm60-esxi1'], u'wwn': [], u'name': u'3m-srm60-esxi1',
+             u'hgroup': None},
+            {u'nqn': [], u'iqn': [], u'wwn': [], u'name': u'3m-ipv6-dev', u'hgroup': None},
+            {u'nqn': [], u'iqn': [], u'wwn': [u'0001000100010001', u'0002000200020002'], u'name': u'test-h',
+             u'hgroup': u'test-hg'},
+            {u'nqn': [], u'iqn': [], u'wwn': [u'0006000600060006', u'0007000700070007'], u'name': u'test-h2',
+             u'hgroup': None}]
+        # Set up array attributes
+        self.array.get.return_value = {'array_name': 'TestFlashArray'}
+
+        # Run the test
+        observed = self.driver.get_volume_info(vol_refs, filter_set)
+
+        # Validate output
+        expected = {'dummy': 'dummyValue'}
+        self.assertEqual(expected, observed)
+
+
     def test_get_host(self):
         good_host = PURE_HOST.copy()
         good_host.update(wwn=["another-wrong-wwn", INITIATOR_WWN])
@@ -3588,7 +3655,7 @@ class PureVolumeUpdateStatsTestCase(PureBaseSharedDriverTestCase):
                                    config_ratio,
                                    expected_ratio,
                                    auto):
-        volume_utis.get_max_over_subscription_ratio = mock.Mock(
+        volume_utils.get_max_over_subscription_ratio = mock.Mock(
             return_value=expected_ratio)
         self.mock_config.pure_automatic_max_oversubscription_ratio = auto
         self.mock_config.max_over_subscription_ratio = config_ratio
@@ -3881,3 +3948,7 @@ class PureVolumeGroupsTestCase(PureBaseSharedDriverTestCase):
             group_snapshot,
             snapshots
         )
+
+import unittest
+if __name__ == '__main__':
+    unittest.main()

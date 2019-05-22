@@ -44,6 +44,8 @@ from cinder.volume.drivers.san import san
 from cinder.volume import utils as volume_utils
 from cinder.zonemanager import utils as fczm_utils
 
+from powervc_cinder.volume.discovery_driver import VolumeDiscoveryDriver
+
 try:
     from purestorage import purestorage
 except ImportError:
@@ -2480,7 +2482,8 @@ class PureISCSIDriver(PureBaseVolumeDriver, san.SanISCSIDriver):
 
 
 @interface.volumedriver
-class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver):
+class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver,
+                   VolumeDiscoveryDriver):
     """OpenStack Volume Driver to support Pure Storage FlashArray.
 
     This version of the driver enables the use of Fibre Channel for
@@ -2488,7 +2491,7 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver):
     supports the Cinder Fibre Channel Zone Manager.
     """
 
-    VERSION = "6.0.0"
+    VERSION = "6.0.PowerVC"
 
     def __init__(self, *args, **kwargs):
         execute = kwargs.pop("execute", utils.execute)
@@ -2510,6 +2513,94 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver):
                     matching_hosts.append(host)
                     break  # go to next host
         return matching_hosts
+
+    def get_vendor_str(self):
+        return 'PURE'  # TODO: not sure what's required here.
+
+    def get_volume_info(self, vol_refs, filter_set):
+        current_array = self._get_current_array()
+        pure_volumes = current_array.list_volumes()  # TODO: Get managed volumes only?
+        pure_hosts = current_array.list_hosts()  # This is more efficient than querying individual hosts
+        # [u'5001500150015000', u'5001500150015001', u'5001500150015002', u'5001500150015003']
+        array_ports = self._get_array_wwns(current_array)
+        print 'array_name %s' % current_array.array_name
+        LOG.debug("Retrieved volumes on FlashArray %(flash_array)s: %(pure_volumes)s",
+                  {"flash_array": current_array.array_name,
+                   "pure_volumes": pure_volumes})
+        ret = []
+        NOT_SUPPORTED_STRING = [u'This volume is not a candidate for management because it is already attached to a '
+                                u'virtual machine.  To manage this volume with PowerVC, you must bring the virtual '
+                                u'machine under management.  Select to manage the virtual machine that has the volume '
+                                u'attached.  The attached volume will be automatically included for management.']
+        SUPPORTED_STRING = [u'This volume is a candidate for management because it is not attached to a virtual '
+                            u'machine.']
+        PURE_REGISTERED_OUI = "624A9370";  # Pure's OUI - ref http://standards.ieee.org/develop/regauth/oui/oui.txt
+        # an overview of Network Address Authority (NAA) naming format:
+        #   https://bryanchain.com/2016/01/20/breaking-down-an-naa-id-world-wide-name/
+        # Network Address Authority (NAA) naming format: https://tools.ietf.org/html/rfc3980#section-5.4
+        # Pure volumes expose a SCSI unique ID of the format "naa.<OUI><VolumeSerial>"
+        # example: naa.624a9370c7b59c51e9ee20ec00011013, i.e. naa.624a9370 and 24 hex digit volume serial
+
+        # TODO: performance will suffer for large number of volumes!!!!
+        for pure_volume in pure_volumes:
+            naa_page83 = PURE_REGISTERED_OUI + pure_volume['serial']
+            print "naa_page83 = %s" % naa_page83
+            # Get hosts connected to this volume
+            private_connections = current_array.list_volume_private_connections(pure_volume['name'])
+            # [{u'host': u'test-h2', u'name': u'test-vol', u'lun': 1, u'size': 5368709120}]
+            print 'private_connections: %s' % private_connections
+            shared_connections = current_array.list_volume_shared_connections(pure_volume['name'])
+            # [{u'host': u'test-h', u'size': 5368709120, u'name': u'test-vol3', u'lun': 254, u'hgroup': u'test-hg'}]
+            print 'shared_connections: %s' % shared_connections
+            private_connections.extend(shared_connections)
+            all_connections = private_connections
+            print 'all connections: %s' % all_connections
+            itl_list = []
+            connect_info = {}
+            for pure_connection in all_connections:
+                pure_host = next(h for h in pure_hosts if h['name'] == pure_connection['host']) # should be only 1
+                # {u'nqn': [], u'iqn': [], u'wwn': [u'0001000100010001', u'0002000200020002'], u'name': u'test-h',
+                # u'hgroup': u'test-hg'}
+                print "pure_host = %s" % pure_host
+                itl_object = {}
+                # TODO: is the name of the vios_host supposed to match the name on storage?
+                itl_object['vios_host'] = pure_connection['host']
+                itl_object['source_wwn'] = pure_host['wwn']  # TODO: confirm that this is required to be initiator wwpn
+                itl_object['vios_wwpn'] = pure_host['wwn']
+                itl_object['target_wwn'] = array_ports
+                itl_object['target_lun'] = pure_connection['lun']
+
+                connect_object = {
+                    'source_wwn': itl_object['source_wwn'],
+                    'target_lun': itl_object['target_lun'],
+                    'host': itl_object['vios_host'],
+                    'target_wwn': itl_object['target_wwn']
+                }
+                connect_info[connect_object['host']] = connect_object  # TODO: is the key the host?
+                itl_list.append(itl_object)
+            vol_ret = {
+                'name': pure_volume['name'],
+                # vol_ret["storage_pool"] = ""  # TODO: what is the storage pool?
+                # vol_ret["uuid"]  # TODO: optional, but if we wanted to how would we get it?
+                'status': 'available' if not itl_list else 'in use',
+                # TODO: Does 'in use' mean connected? what are the other possible values?
+                'size': self._round_bytes_to_gib(pure_volume['size']),
+                'itl_list': itl_list,
+                'connection_info': connect_info,
+                'pg83NAA': naa_page83,  # TODO: should this start with 'naa.' ?
+                'restricted_metadata': {
+                    'vdisk_id': naa_page83,
+                    'vdisk_name': pure_volume['name'],
+                    'vdisk_uid': pure_volume['serial'],
+                    'naa': naa_page83
+                },
+                'support': {
+                    'status': 'supported' if not itl_list else 'not supported',
+                    'reasons': SUPPORTED_STRING if not itl_list else NOT_SUPPORTED_STRING
+                }
+            }
+            ret.append(vol_ret)
+        return ret
 
     @staticmethod
     def _get_array_wwns(array):
