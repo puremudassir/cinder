@@ -3366,7 +3366,23 @@ class PureFCDriverTestCase(PureBaseSharedDriverTestCase):
     @mock.patch(FC_DRIVER_OBJ + "._get_array_wwns")
     def test_get_volume_info(self, mock_get_array_wwns ):
         # Set up inputs
-        vol_refs = None
+        vol_refs = [
+            {
+                'uid': '98bbe2f7-f097-4728-81fe-8493334d0ae9',
+                'k2udid': '735a9d6c-d8fb-41a2-899d-29327ef4f0b8',
+                'pg83NAA': '624A93708E9C7E588B16C1EA00048CCA' # 624A9370 + volume serial, should match test-vol
+            },
+            {
+                'uid': '98bbe2f7-f097-4728-81fe-8493334d0a77',
+                'k2udid': '735a9d6c-d8fb-41a2-899d-29327ef4f099',
+                'pg83NAA': '624A93708E9C7E588B16C1EA00048CCB'  # 624A9370 + volume serial,should match test-vol2
+            },
+            {
+                'uid': '98bbe2f7-f097-4728-81fe-8493334d0a77',
+                'k2udid': '735a9d6c-d8fb-41a2-899d-29327ef4f099',
+                'pg83NAA': '624A93708E9C7E588B16C1EA00048CCD'  # 624A9370 + volume serial,should match test-vol3
+            }
+        ]
         filter_set = None
 
         # Set up mocks
@@ -3394,7 +3410,15 @@ class PureFCDriverTestCase(PureBaseSharedDriverTestCase):
             'size': 3221225472,
             'created': '2016-08-05T17:26:34Z',
             'source': None,
-        }]
+        },
+        {
+            'name': 'test-vol4',
+            'serial': '8E9C7E588B16C1EA00048CCE',
+            'size': 3221225472,
+            'created': '2016-08-05T17:36:34Z',
+            'source': None,
+        }
+        ]
         # test-vol3 --> test-hg --> test-h
         # test-vol  --> test-h2
 

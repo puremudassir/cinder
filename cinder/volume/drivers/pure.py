@@ -2515,7 +2515,7 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver,
         return matching_hosts
 
     def get_vendor_str(self):
-        return 'PURE'  # TODO: not sure what's required here.
+        return 'PURE FlashArray SCSI Disk Device'  # TODO: not sure what's required here.
 
     def get_volume_info(self, vol_refs, filter_set):
         current_array = self._get_current_array()
@@ -2544,6 +2544,10 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver,
         # TODO: performance will suffer for large number of volumes!!!!
         for pure_volume in pure_volumes:
             naa_page83 = PURE_REGISTERED_OUI + pure_volume['serial']
+            if vol_refs:
+                vol_refs_search = [v['pg83NAA'] for v in vol_refs if v['pg83NAA']==naa_page83]
+                if not vol_refs_search:
+                    continue  # Skip this volume, not in vol_refs
             print "naa_page83 = %s" % naa_page83
             # Get hosts connected to this volume
             private_connections = current_array.list_volume_private_connections(pure_volume['name'])
@@ -2580,14 +2584,14 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver,
                 itl_list.append(itl_object)
             vol_ret = {
                 'name': pure_volume['name'],
+                'is_mapped': False if not itl_list else True,
                 # vol_ret["storage_pool"] = ""  # TODO: what is the storage pool?
                 # vol_ret["uuid"]  # TODO: optional, but if we wanted to how would we get it?
-                'status': 'available' if not itl_list else 'in use',
-                # TODO: Does 'in use' mean connected? what are the other possible values?
+                'status': 'available' if not itl_list else 'in use',  # TODO: what are the 'error' conditions?
                 'size': self._round_bytes_to_gib(pure_volume['size']),
                 'itl_list': itl_list,
                 'connection_info': connect_info,
-                'pg83NAA': naa_page83,  # TODO: should this start with 'naa.' ?
+                'pg83NAA': naa_page83,
                 'restricted_metadata': {
                     'vdisk_id': naa_page83,
                     'vdisk_name': pure_volume['name'],
@@ -2601,6 +2605,9 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver,
             }
             ret.append(vol_ret)
         return ret
+
+    def _pre_process_volume_info(self, volume_info, vm_blocking_volumes):
+        return  # TODO: validate that we don't need to do anything
 
     @staticmethod
     def _get_array_wwns(array):
